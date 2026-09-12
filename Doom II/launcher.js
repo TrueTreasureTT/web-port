@@ -1,59 +1,113 @@
 "use strict";
 
-// Global on purpose: index.html calls this directly with onclick="startDoom()".
-let doomStarted = false;
+(() => {
+  let doomStarted = false;
+  let engineScript = null;
 
-function startDoom() {
-  const library = document.getElementById("library");
-  const game = document.getElementById("game");
-  const canvas = document.getElementById("canvas");
-  const loading = document.getElementById("loading");
+  function $(id) {
+    return document.getElementById(id);
+  }
 
-  // Change the page immediately. If this does not happen, launcher.js was not loaded.
-  library.style.display = "none";
-  game.classList.add("active");
-  loading.textContent = "Loading Doom II…";
-  canvas.focus();
-
-  if (doomStarted) return;
-  doomStarted = true;
-
-  window.Module = {
-    canvas: canvas,
-    locateFile: function(file) {
-      return "./" + file;
-    },
-    print: function(text) { console.log("[DOOM II]", text); },
-    printErr: function(text) { console.error("[DOOM II]", text); },
-    setStatus: function(text) {
-      if (text) loading.textContent = text;
-    },
-    onRuntimeInitialized: function() {
-      loading.style.display = "none";
-      canvas.focus();
-    },
-    onAbort: function(reason) {
-      console.error("Doom II aborted:", reason);
-      loading.textContent = "Engine error: " + reason;
-      doomStarted = false;
+  function showError(message) {
+    const loading = $("loading");
+    if (loading) {
+      loading.style.display = "grid";
+      loading.textContent = message;
     }
-  };
+    console.error("[Doom II]", message);
+  }
 
-  const engine = document.createElement("script");
-  engine.src = "./doom2.js";
-  engine.async = false;
-  engine.onload = function() {
-    console.log("doom2.js loaded");
-  };
-  engine.onerror = function() {
-    loading.textContent = "ERROR: doom2.js could not be loaded.";
-    doomStarted = false;
-  };
-  document.body.appendChild(engine);
-}
+  function startDoom() {
+    const library = $("library");
+    const game = $("game");
+    const canvas = $("canvas");
+    const loading = $("loading");
 
-// Backup listener as well.
-document.addEventListener("DOMContentLoaded", function() {
-  const button = document.getElementById("play");
-  if (button) button.addEventListener("click", startDoom);
-});
+    if (!library || !game || !canvas || !loading) {
+      showError("Doom II launcher: required HTML elements are missing.");
+      return;
+    }
+
+    library.style.display = "none";
+    game.classList.add("active");
+    loading.style.display = "grid";
+    loading.textContent = "Loading Doom II…";
+    canvas.focus();
+
+    if (doomStarted) return;
+    doomStarted = true;
+
+    // WebDOOM/Emscripten reads Module before the generated engine script starts.
+    window.Module = {
+      canvas,
+      locateFile(file) {
+        return new URL(file, document.baseURI).href;
+      },
+      print(text) {
+        console.log("[DOOM II]", text);
+      },
+      printErr(text) {
+        console.error("[DOOM II]", text);
+      },
+      setStatus(text) {
+        if (text) loading.textContent = text;
+      },
+      onRuntimeInitialized() {
+        loading.style.display = "none";
+        canvas.focus();
+      },
+      onAbort(reason) {
+        doomStarted = false;
+        showError("Doom II stopped: " + (reason || "unknown engine error"));
+      }
+    };
+
+    // build-doom2.sh stages the generated WebDOOM files in this directory.
+    // Prefer the original Doom II glue file, then use doom.js as the build-script fallback.
+    const candidates = ["./doom2.js", "./doom.js"];
+
+    function loadNext(index) {
+      if (index >= candidates.length) {
+        doomStarted = false;
+        showError(
+          "ERROR: Doom II engine is not built. Run ./build-doom2.sh in Codespaces, then reload."
+        );
+        return;
+      }
+
+      const script = document.createElement("script");
+      script.src = candidates[index];
+      script.async = false;
+
+      script.onload = () => {
+        engineScript = script;
+        console.log("[Doom II] Engine loaded:", script.src);
+      };
+
+      script.onerror = () => {
+        script.remove();
+        loadNext(index + 1);
+      };
+
+      document.head.appendChild(script);
+    }
+
+    loadNext(0);
+  }
+
+  // Keep this global so other pages or the browser console can launch the game.
+  window.startDoom = startDoom;
+
+  document.addEventListener("DOMContentLoaded", () => {
+    const button = $("play");
+    if (!button) return;
+
+    button.addEventListener("click", startDoom, { once: false });
+    button.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        startDoom();
+      }
+    });
+  });
+})();
