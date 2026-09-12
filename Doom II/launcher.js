@@ -1,88 +1,245 @@
 "use strict";
 
-(() => {
-  let doomStarted = false;
+class WebGameLauncher {
+    constructor(options = {}) {
+        this.canvasId = options.canvasId || "game-canvas";
+        this.statusId = options.statusId || "status";
 
-  const $ = (id) => document.getElementById(id);
+        this.canvas = null;
+        this.statusElement = null;
 
-  function showError(message) {
-    const loading = $("loading");
-    if (loading) {
-      loading.style.display = "grid";
-      loading.textContent = message;
-    }
-    console.error("[Doom II]", message);
-  }
-
-  function startDoom() {
-    const library = $("library");
-    const game = $("game");
-    const canvas = $("canvas");
-    const loading = $("loading");
-
-    if (!library || !game || !canvas || !loading) {
-      showError("Doom II launcher: required HTML elements are missing.");
-      return;
+        this.running = false;
+        this.module = null;
     }
 
-    if (doomStarted) return;
-    doomStarted = true;
+    init() {
+        this.canvas = document.getElementById(this.canvasId);
+        this.statusElement = document.getElementById(this.statusId);
 
-    library.style.display = "none";
-    game.classList.add("active");
-    loading.style.display = "grid";
-    loading.textContent = "Loading Doom II…";
-    canvas.focus();
+        if (!this.canvas) {
+            throw new Error(
+                `Canvas #${this.canvasId} was not found`
+            );
+        }
 
-    // WebDOOM documents -nosound as the browser-safe mode when the optional
-    // external SFX/music files are not bundled. Freedoom supplies the game data.
-    window.Module = {
-      canvas,
-      arguments: ["-nosound"],
+        this.setupCanvas();
+        this.setupInput();
+    }
 
-      locateFile(file) {
-        return new URL(file, document.baseURI).href;
-      },
+    setupCanvas() {
+        this.canvas.width = 960;
+        this.canvas.height = 600;
 
-      print(text) {
-        console.log("[Doom II]", text);
-      },
+        this.canvas.style.width = "100%";
+        this.canvas.style.height = "auto";
 
-      printErr(text) {
-        console.error("[Doom II]", text);
-      },
+        this.canvas.tabIndex = 0;
+    }
 
-      setStatus(text) {
-        if (text) loading.textContent = text;
-      },
+    setupInput() {
+        this.canvas.addEventListener(
+            "click",
+            () => {
+                this.canvas.focus();
+            }
+        );
 
-      onRuntimeInitialized() {
-        loading.style.display = "none";
-        canvas.focus();
-        console.log("[Doom II] WebAssembly runtime ready.");
-      },
+        window.addEventListener(
+            "keydown",
+            event => {
+                const blockedKeys = [
+                    "ArrowUp",
+                    "ArrowDown",
+                    "ArrowLeft",
+                    "ArrowRight",
+                    " "
+                ];
 
-      onAbort(reason) {
-        doomStarted = false;
-        showError("Doom II stopped: " + (reason || "unknown engine error"));
-      }
-    };
+                if (blockedKeys.includes(event.key)) {
+                    event.preventDefault();
+                }
+            }
+        );
+    }
 
-    const script = document.createElement("script");
-    script.src = new URL("./doom2.js", document.baseURI).href;
-    script.async = false;
+    setStatus(message) {
+        console.log("[DOOM II]", message);
 
-    script.onload = () => {
-      console.log("[Doom II] WebAssembly engine loaded.");
-    };
+        if (this.statusElement) {
+            this.statusElement.textContent = message;
+        }
+    }
 
-    script.onerror = () => {
-      doomStarted = false;
-      showError("ERROR: doom2.js could not be loaded from the Doom II folder.");
-    };
+    async start() {
+        if (this.running) {
+            return;
+        }
 
-    document.head.appendChild(script);
-  }
+        try {
+            this.init();
 
-  window.startDoom = startDoom;
-})();
+            this.setStatus(
+                "Loading WebAssembly engine..."
+            );
+
+            await this.loadGameEngine();
+
+            this.running = true;
+
+            this.setStatus(
+                "Game running!"
+            );
+
+        } catch (error) {
+            console.error(error);
+
+            this.setStatus(
+                "Failed to start: " + error.message
+            );
+        }
+    }
+
+    loadGameEngine() {
+        return new Promise(
+            (resolve, reject) => {
+
+                const script =
+                    document.createElement("script");
+
+                script.src = "./doom.js";
+
+                script.async = true;
+
+                window.Module = {
+                    canvas: this.canvas,
+
+                    locateFile: (file) => {
+                        return "./" + file;
+                    },
+
+                    print: (text) => {
+                        console.log(
+                            "[DOOM]",
+                            text
+                        );
+                    },
+
+                    printErr: (text) => {
+                        console.error(
+                            "[DOOM ERROR]",
+                            text
+                        );
+                    },
+
+                    setStatus: (text) => {
+                        this.setStatus(text);
+                    },
+
+                    monitorRunDependencies: (
+                        remaining
+                    ) => {
+                        if (remaining > 0) {
+                            this.setStatus(
+                                `Loading engine... ${remaining}`
+                            );
+                        }
+                    },
+
+                    onRuntimeInitialized: () => {
+                        console.log(
+                            "WebAssembly runtime initialized"
+                        );
+
+                        resolve();
+                    },
+
+                    onAbort: (message) => {
+                        reject(
+                            new Error(
+                                "Engine aborted: " +
+                                message
+                            )
+                        );
+                    }
+                };
+
+                script.onload = () => {
+                    console.log(
+                        "Doom JavaScript loader loaded"
+                    );
+                };
+
+                script.onerror = () => {
+                    reject(
+                        new Error(
+                            "Could not load doom.js"
+                        )
+                    );
+                };
+
+                document.body.appendChild(script);
+            }
+        );
+    }
+
+    stop() {
+        if (!this.running) {
+            return;
+        }
+
+        this.running = false;
+
+        this.setStatus(
+            "Game stopped"
+        );
+    }
+
+    fullscreen() {
+        if (!this.canvas) {
+            return;
+        }
+
+        if (this.canvas.requestFullscreen) {
+            this.canvas.requestFullscreen();
+        }
+    }
+}
+
+
+const game = new WebGameLauncher({
+    canvasId: "game-canvas",
+    statusId: "status"
+});
+
+
+window.addEventListener(
+    "DOMContentLoaded",
+    () => {
+
+        const startButton =
+            document.getElementById("start-game");
+
+        const fullscreenButton =
+            document.getElementById("fullscreen");
+
+        if (startButton) {
+            startButton.addEventListener(
+                "click",
+                () => {
+                    game.start();
+                }
+            );
+        }
+
+        if (fullscreenButton) {
+            fullscreenButton.addEventListener(
+                "click",
+                () => {
+                    game.fullscreen();
+                }
+            );
+        }
+
+        game.start();
+    }
+);
