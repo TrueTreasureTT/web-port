@@ -25,7 +25,6 @@
       return;
     }
 
-    // Prevent a second click from loading the Emscripten engine twice.
     if (doomStarted) return;
     doomStarted = true;
 
@@ -33,14 +32,14 @@
     game.classList.add("active");
     loading.style.display = "grid";
     loading.textContent = "Loading Doom II…";
-
     canvas.focus();
 
-    // Emscripten reads window.Module before the generated engine script executes.
+    // WebDOOM documents -nosound as the browser-safe mode when the optional
+    // external SFX/music files are not bundled. Freedoom supplies the game data.
     window.Module = {
-      canvas: canvas,
+      canvas,
+      arguments: ["-nosound"],
 
-      // Keep all generated WebDOOM files relative to Doom II/index.html.
       locateFile(file) {
         return new URL(file, document.baseURI).href;
       },
@@ -69,38 +68,21 @@
       }
     };
 
-    // build-doom2.sh normally creates doom2.js.
-    // doom.js is kept as a fallback for older WebDOOM builds.
-    const candidates = ["./doom2.js", "./doom.js"];
+    const script = document.createElement("script");
+    script.src = new URL("./doom2.js", document.baseURI).href;
+    script.async = false;
 
-    function loadEngine(index) {
-      if (index >= candidates.length) {
-        doomStarted = false;
-        showError(
-          "ERROR: Doom II engine files are missing. Build WebDOOM with ./build-doom2.sh, then reload."
-        );
-        return;
-      }
+    script.onload = () => {
+      console.log("[Doom II] WebAssembly engine loaded.");
+    };
 
-      const script = document.createElement("script");
-      script.src = new URL(candidates[index], document.baseURI).href;
-      script.async = false;
+    script.onerror = () => {
+      doomStarted = false;
+      showError("ERROR: doom2.js could not be loaded from the Doom II folder.");
+    };
 
-      script.onload = () => {
-        console.log("[Doom II] Engine loaded:", candidates[index]);
-      };
-
-      script.onerror = () => {
-        script.remove();
-        loadEngine(index + 1);
-      };
-
-      document.head.appendChild(script);
-    }
-
-    loadEngine(0);
+    document.head.appendChild(script);
   }
 
-  // index.html calls this directly from the Play button.
   window.startDoom = startDoom;
 })();
