@@ -1,0 +1,78 @@
+name: Build and deploy Doom II
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Emscripten
+        uses: emscripten-core/setup-emsdk@v16
+        with:
+          version: 6.0.8
+
+      - name: Build Doom II WebAssembly
+        shell: bash
+        run: |
+          cd "Doom II"
+          chmod +x build-doom2.sh
+          ./build-doom2.sh
+          test -s doom2.js
+          test -s doom2.wasm
+          test -s doom2.data
+
+      - name: Stage complete static site
+        shell: bash
+        run: |
+          rm -rf site
+          mkdir -p site
+
+          # Preserve the existing Chapter 1/Chapter 2 site structure.
+          rsync -a \
+            --exclude='.git/' \
+            --exclude='Doom II/WebDOOM/' \
+            --exclude='Doom II/doom2.js' \
+            --exclude='Doom II/doom2.wasm' \
+            --exclude='Doom II/doom2.data' \
+            ./ site/
+
+          cp "Doom II/doom2.js" site/"Doom II/doom2.js"
+          cp "Doom II/doom2.wasm" site/"Doom II/doom2.wasm"
+          cp "Doom II/doom2.data" site/"Doom II/doom2.data"
+
+          test -s site/"Doom II"/index.html
+          test -s site/"Doom II"/launcher.js
+          test -s site/"Doom II"/doom2.js
+          test -s site/"Doom II"/doom2.wasm
+          test -s site/"Doom II"/doom2.data
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
