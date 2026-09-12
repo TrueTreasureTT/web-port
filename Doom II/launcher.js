@@ -2,11 +2,8 @@
 
 (() => {
   let doomStarted = false;
-  let engineScript = null;
 
-  function $(id) {
-    return document.getElementById(id);
-  }
+  const $ = (id) => document.getElementById(id);
 
   function showError(message) {
     const loading = $("loading");
@@ -28,86 +25,82 @@
       return;
     }
 
+    // Prevent a second click from loading the Emscripten engine twice.
+    if (doomStarted) return;
+    doomStarted = true;
+
     library.style.display = "none";
     game.classList.add("active");
     loading.style.display = "grid";
     loading.textContent = "Loading Doom II…";
+
     canvas.focus();
 
-    if (doomStarted) return;
-    doomStarted = true;
-
-    // WebDOOM/Emscripten reads Module before the generated engine script starts.
+    // Emscripten reads window.Module before the generated engine script executes.
     window.Module = {
-      canvas,
+      canvas: canvas,
+
+      // Keep all generated WebDOOM files relative to Doom II/index.html.
       locateFile(file) {
         return new URL(file, document.baseURI).href;
       },
+
       print(text) {
-        console.log("[DOOM II]", text);
+        console.log("[Doom II]", text);
       },
+
       printErr(text) {
-        console.error("[DOOM II]", text);
+        console.error("[Doom II]", text);
       },
+
       setStatus(text) {
         if (text) loading.textContent = text;
       },
+
       onRuntimeInitialized() {
         loading.style.display = "none";
         canvas.focus();
+        console.log("[Doom II] WebAssembly runtime ready.");
       },
+
       onAbort(reason) {
         doomStarted = false;
         showError("Doom II stopped: " + (reason || "unknown engine error"));
       }
     };
 
-    // build-doom2.sh stages the generated WebDOOM files in this directory.
-    // Prefer the original Doom II glue file, then use doom.js as the build-script fallback.
+    // build-doom2.sh normally creates doom2.js.
+    // doom.js is kept as a fallback for older WebDOOM builds.
     const candidates = ["./doom2.js", "./doom.js"];
 
-    function loadNext(index) {
+    function loadEngine(index) {
       if (index >= candidates.length) {
         doomStarted = false;
         showError(
-          "ERROR: Doom II engine is not built. Run ./build-doom2.sh in Codespaces, then reload."
+          "ERROR: Doom II engine files are missing. Build WebDOOM with ./build-doom2.sh, then reload."
         );
         return;
       }
 
       const script = document.createElement("script");
-      script.src = candidates[index];
+      script.src = new URL(candidates[index], document.baseURI).href;
       script.async = false;
 
       script.onload = () => {
-        engineScript = script;
-        console.log("[Doom II] Engine loaded:", script.src);
+        console.log("[Doom II] Engine loaded:", candidates[index]);
       };
 
       script.onerror = () => {
         script.remove();
-        loadNext(index + 1);
+        loadEngine(index + 1);
       };
 
       document.head.appendChild(script);
     }
 
-    loadNext(0);
+    loadEngine(0);
   }
 
-  // Keep this global so other pages or the browser console can launch the game.
+  // index.html calls this directly from the Play button.
   window.startDoom = startDoom;
-
-  document.addEventListener("DOMContentLoaded", () => {
-    const button = $("play");
-    if (!button) return;
-
-    button.addEventListener("click", startDoom, { once: false });
-    button.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        startDoom();
-      }
-    });
-  });
 })();
